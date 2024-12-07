@@ -201,11 +201,11 @@
       endScreenPlaylistRenderer: baseRules,
       gridPlaylistRenderer: baseRules,
       postRenderer: {
-        channelId: 'navigationEndpoint.browseEndpoint.browseId',
+        channelId: 'authorEndpoint.browseEndpoint.browseId',
         channelName: ['authorText']
       },
       backstagePostRenderer: {
-        channelId: 'navigationEndpoint.browseEndpoint.browseId',
+        channelId: 'authorEndpoint.browseEndpoint.browseId',
         channelName: ['authorText']
       },
 
@@ -250,9 +250,9 @@
       },
 
       // channel page header
-      c4TabbedHeaderRenderer: {
+      channelMetadataRenderer: {
         properties: {
-          channelId: 'channelId',
+          channelId: 'externalId',
           channelName: 'title',
         },
         customFunc: redirectToIndex,
@@ -320,6 +320,13 @@
         }
       },
 
+      shortsLockupViewModel: {
+        properties: {
+          videoId: 'onTap.innertubeCommand.reelWatchEndpoint.videoId',
+          title: ['accessibilityText'],
+        }
+      },
+
       richShelfRenderer: {
         channelId: 'endpoint.browseEndpoint.browseId'
       },
@@ -360,6 +367,10 @@
 
       tabRenderer: {
         channelId: 'endpoint.commandMetadata.webCommandMetadata.url'
+      },
+
+      lockupViewModel: {
+
       }
 
     },
@@ -409,6 +420,13 @@
       },
     },
     comments: {
+      commentEntityPayload: {
+        channelId: ['author.channelId'],
+        channelName: ['author.displayName'],
+        comment: ['properties.content.content']
+      },
+      commentThreadRenderer: {},
+      commentViewModel: {},
       commentRenderer: {
         channelId: 'authorEndpoint.browseEndpoint.browseId',
         channelName: ['authorText'],
@@ -432,6 +450,7 @@
     this.object = object;
     this.filterRules = filterRules;
     this.contextMenus = contextMenus;
+    this.blockedComments = [];
 
     this.filter();
     try {
@@ -524,7 +543,9 @@
         console.error("Custom function exception", e);
       }
     }
-
+    if (doBlock && objectType === 'commentEntityPayload') {
+      this.blockedComments.push(obj.properties.commentId);
+    }
     return doBlock;
   };
 
@@ -533,8 +554,26 @@
       if (h === 'movieRenderer' || h === 'compactMovieRenderer') return true;
       if (h === 'videoRenderer' && !getObjectByPath(filteredObject, "shortBylineText.runs.navigationEndpoint.browseEndpoint") && filteredObject.longBylineText && filteredObject.badges) return true;
     }
-    if (storageData.options.shorts && h === 'reelItemRenderer') return true;
+    if (storageData.options.shorts && (h === 'shortsLockupViewModel' || h === 'reelItemRenderer') ) return true;
     if (storageData.options.mixes && (h === 'radioRenderer' || h === 'compactRadioRenderer')) return true;
+    if (storageData.options.mixes && h === 'lockupViewModel') {
+      let imgName = getObjectByPath(filteredObject, 'contentImage.collectionThumbnailViewModel.primaryThumbnail.thumbnailViewModel.overlays.thumbnailOverlayBadgeViewModel.thumbnailBadges.thumbnailBadgeViewModel.icon.sources.clientResource.imageName');
+      if (imgName === 'MIX') {
+        return true;
+      }
+    }
+
+    if (h === 'commentThreadRenderer') {
+      if (this.blockedComments.includes(getObjectByPath(filteredObject, 'commentViewModel.commentViewModel.commentId'))) {
+        return true;
+      }
+    }
+
+    if (h === 'commentViewModel') {
+      if (this.blockedComments.includes(getObjectByPath(filteredObject, 'commentId'))) {
+        return true;
+      } 
+    }
 
     return false;
   }
@@ -1034,6 +1073,7 @@
     }
 
     data.filterData.channelId.push(/^TAB_SHORTS$/);
+    data.filterData.channelId.push(/^TAB_SHORTS_CAIRO$/);
     data.filterData.channelId.push(/^.+\/shorts$/);
   }
 
@@ -1119,7 +1159,12 @@
       }
 
       if(!items) return;
-      const blockCh = { menuServiceItemRenderer: { _btOriginalAttr: attr, _btMenuAction: "block_channel", _btOriginalData: channelData, text: { runs: [{ text: 'Block Channel' }] }, "serviceEndpoint": {
+      const blockCh = { menuServiceItemRenderer: { _btOriginalAttr: attr, _btMenuAction: "block_channel", _btOriginalData: channelData, "text": { "runs": [ { "text": "Block Channel" } ]},
+        "icon": {
+          "iconType": "NOT_INTERESTED"
+        },
+        "trackingParams": "Cg==",
+        "serviceEndpoint": {
         "commandMetadata": {
           "webCommandMetadata": {
             "sendPost": true,
@@ -1154,7 +1199,12 @@
           ]
         }
       } } };
-      const blockVid = { menuServiceItemRenderer: {  _btOriginalAttr: attr, _btMenuAction: "block_video", _btOriginalData: videoData, text: { runs: [{ text: 'Block Video' }] }, "serviceEndpoint": {
+      const blockVid = { menuServiceItemRenderer: { _btOriginalAttr: attr, _btMenuAction: "block_video", _btOriginalData: videoData, "text": { "runs": [ { "text": "Block Video" } ]},
+        "icon": {
+          "iconType": "NOT_INTERESTED"
+        },
+        "trackingParams": "Cg==",
+        "serviceEndpoint": {
         "commandMetadata": {
           "webCommandMetadata": {
             "sendPost": true,
@@ -1317,7 +1367,7 @@
       }
     }
 
-    if (items instanceof Array){
+    if (items instanceof Array) {
       const blockCh = { menuServiceItemRenderer: { text: { runs: [{ text: 'Block Channel' }] }, icon: {iconType: "NOT_INTERESTED"} } };
       const blockVid = { menuServiceItemRenderer: { text: { runs: [{ text: 'Block Video' }] }, icon: {iconType: "NOT_INTERESTED"} } };
       if (storageData.options.block_feedback)
@@ -1411,6 +1461,15 @@
     // Enable JS filtering only if function has something in it
     if (storageData.options.enable_javascript && storageData.filterData.javascript) {
       try {
+        try {
+          if (window.trustedTypes && window.trustedTypes.createPolicy) {
+            window.trustedTypes.createPolicy('default', {
+              createHTML: string => string,
+              createScriptURL: string => string,
+              createScript: string => string,
+            });
+          }
+        } catch (e) {}
         jsFilter = window.eval(storageData.filterData.javascript);
         if (!(jsFilter instanceof Function)) {
           throw Error("Function not found");
@@ -1465,15 +1524,18 @@
   }
 
   function menuOnTapMobile(event) {
-    if (!this.data || !this.data._btOriginalAttr || !this.data._btMenuAction) return;
-
     if (window.btReloadRequired) {
       window.btExports.openToast("BlockTube was updated, this tab needs to be reloaded to use this function", 5000);
       return;
     }
 
+    let data = getObjectByPath(this, '__instance.props.data') || this.data;
+    if (!data || !data._btOriginalData) {
+      return;
+    }
+
     let type;
-    switch (this.data._btMenuAction) {
+    switch (data._btMenuAction) {
       case 'block_channel': {
         type = 'channelId';
         break;
@@ -1486,10 +1548,15 @@
         return;
     }
 
-    postMessage('contextBlockData', { type, info: this.data._btOriginalData });
-    if (this.data._btOriginalAttr === 'slimVideoMetadataSectionRenderer') {
+    postMessage('contextBlockData', { type, info: data._btOriginalData });
+    if (data._btOriginalAttr === 'slimVideoMetadataSectionRenderer') {
       document.getElementById('movie_player').stopVideo();
       alert( (type === 'videoId' ? 'Video' : 'Channel') + ' Blocked');
+    }
+    if (data._btOriginalAttr === 'commentRenderer') {
+      let comments = document.querySelector('ytm-section-list-renderer')
+      storageData.filterData.channelId.push(RegExp('^' + data._btOriginalData.id + '$'));
+      ObjectFilter(comments.data, filterRules.comments, [], false);
     }
   }
 
@@ -1513,14 +1580,25 @@
     if (!eventSink) {
       eventSink = getObjectByPath(this.parentElement, '__dataHost.eventSink_');
     }
+    if (!eventSink) {
+      eventSink = getObjectByPath(this.parentElement, '__dataHost.forwarder_.eventSink');
+    }
+    if (!eventSink) {
+      eventSink = getObjectByPath(this.parentElement.parentElement, 'polymerController.forwarder_.eventSink');
+    }
     const parentDom = eventSink.parentComponent || eventSink.parentElement.__dataHost.hostElement;
     const parentData = parentDom.data;
     let removeParent = true;
 
     // Video player context menu
     if (parentDom.tagName === 'YTD-VIDEO-PRIMARY-INFO-RENDERER' || parentDom.tagName === 'YTD-WATCH-METADATA') {
-      const player = document.getElementsByTagName('ytd-page-manager')[0].data.playerResponse;
-      const owner = document.getElementsByTagName('ytd-video-owner-renderer')[0].data;
+      const pageManager = document.getElementsByTagName('ytd-page-manager')[0];
+      const playerData = pageManager.data || pageManager.getCurrentData();
+      const player = playerData.playerResponse;
+
+      const ownerRenderer = document.getElementsByTagName('ytd-video-owner-renderer')[0];
+      const owner = ownerRenderer.data || ownerRenderer.getCurrentData();
+
       const ownerUCID = owner.title.runs[0].navigationEndpoint.browseEndpoint.browseId;
       let playerUCID = player.videoDetails.channelId;
       if (playerUCID !== ownerUCID) {
